@@ -2,6 +2,7 @@ import React from 'react';
 import {AbsoluteFill, Audio, interpolate, Sequence, staticFile} from 'remotion';
 import {audio, brand, copy as allCopy, DURATION_IN_FRAMES, FormatId, FPS, Lang, scenes} from './config';
 import {detected} from './generated/assets';
+import {aiNarration} from './generated/narration';
 import {Camera, Embers, Flash, Grain, useShake, Vignette} from './fx';
 import {accentDeep} from './theme';
 import {EndCard, Energy, Hook, LogoReveal, Tease} from './scenes';
@@ -12,34 +13,32 @@ export type TeaserProps = {lang: Lang; format: FormatId};
 
 const Soundtrack: React.FC<{lang: Lang}> = ({lang}) => {
   const music = audio.music !== 'auto' ? audio.music : detected.userMusic ?? detected.placeholderMusic;
-  const vo = lang === 'fa' && audio.voiceover.enabled !== false ? detected.voiceoverFa : null;
-  const voStart = audio.voiceover.startFrame;
-  const voEnd = vo ? voStart + Math.ceil(vo.durationInSeconds * FPS) : 0;
-  const ramp = audio.voiceover.duckRampFrames;
-  const musicVolume = (f: number) => {
-    const fade = interpolate(f, [DURATION_IN_FRAMES - audio.fadeOutFrames, DURATION_IN_FRAMES], [1, 0], {
-      extrapolateLeft: 'clamp',
-      extrapolateRight: 'clamp',
-    });
-    const duck = vo
-      ? interpolate(f, [voStart - ramp, voStart, voEnd, voEnd + ramp], [1, audio.voiceover.duckedMusicVolume / audio.musicVolume, audio.voiceover.duckedMusicVolume / audio.musicVolume, 1], {
-          extrapolateLeft: 'clamp',
-          extrapolateRight: 'clamp',
-        })
-      : 1;
-    return audio.musicVolume * fade * duck;
-  };
+  const vo = audio.voiceover;
+  const recorded = vo.enabled ? detected.recordedVoiceover[lang] : null;
+  // A recorded file wins over the AI narration lines.
+  const lines = !vo.enabled
+    ? []
+    : recorded
+      ? [{at: vo.recordedStartFrame, file: recorded.file, durationInFrames: Math.ceil(recorded.durationInSeconds * FPS)}]
+      : aiNarration[lang] ?? [];
+  const fadeOut = (f: number) =>
+    interpolate(f, [DURATION_IN_FRAMES - audio.fadeOutFrames, DURATION_IN_FRAMES], [1, 0], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
+  const ducked = vo.duckedMusicVolume / audio.musicVolume;
+  const r = vo.duckRampFrames;
+  const duck = (f: number) =>
+    lines.reduce((m, l) => {
+      const end = l.at + l.durationInFrames;
+      const v = interpolate(f, [l.at - r, l.at, end, end + r], [1, ducked, ducked, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
+      return Math.min(m, v);
+    }, 1);
   return (
     <>
-      <Audio src={staticFile(music)} volume={musicVolume} trimBefore={Math.round(audio.musicStartFrom * FPS)} />
-      {vo ? (
-        <Sequence from={voStart}>
-          <Audio
-            src={staticFile(vo.file)}
-            volume={(f) => audio.voiceover.volume * interpolate(f + voStart, [DURATION_IN_FRAMES - audio.fadeOutFrames, DURATION_IN_FRAMES], [1, 0], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})}
-          />
+      <Audio src={staticFile(music)} volume={(f) => audio.musicVolume * fadeOut(f) * duck(f)} trimBefore={Math.round(audio.musicStartFrom * FPS)} />
+      {lines.map((l, i) => (
+        <Sequence key={i} from={l.at} durationInFrames={l.durationInFrames + 30}>
+          <Audio src={staticFile(l.file)} volume={(f) => vo.volume * fadeOut(f + l.at)} />
         </Sequence>
-      ) : null}
+      ))}
     </>
   );
 };

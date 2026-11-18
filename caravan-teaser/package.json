@@ -10,7 +10,8 @@
     "render:en-square": "remotion render TeaserENSquare out/caravan-fitness-teaser-en-1x1.mp4",
     "render:en-wide": "remotion render TeaserENWide out/caravan-fitness-teaser-en-16x9.mp4",
     "render:all": "npm run prepare-assets && npm run render:en && npm run render:fa && npm run render:en-square && npm run render:en-wide",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "make-voiceover": "python3 scripts/make-voiceover.py"
   },
   "dependencies": {
     "@fontsource/anton": "5.3.0",

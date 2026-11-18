@@ -54,8 +54,18 @@ export const Tease: React.FC<{copy: Copy}> = ({copy}) => {
   const {u} = useLayout();
   const starts = copy.tease.map((_, i) => (hits.teaseLines[i] ?? hits.teaseLines[0] + i * 2 * FRAMES_PER_BEAT) - scenes.tease.from);
   const fa = copy.lang === 'fa';
+  const bgShots = hasFootage() && footage.behindTease ? footage.teaseShots : [];
   return (
     <AbsoluteFill>
+      {bgShots.map((shot, i) => {
+        const from = i === 0 ? 0 : starts[i] ?? starts[0] + i * 40;
+        const to = i < bgShots.length - 1 ? (starts[i + 1] ?? from + 40) : scenes.tease.duration;
+        return (
+          <Sequence key={i} from={from} durationInFrames={to - from} layout="none">
+            <FootageShot shot={shot} len={to - from} overlay={footage.teaseOverlay} blur={2} seed={`t${i}`} />
+          </Sequence>
+        );
+      })}
       <LightStreaks count={8} seed="tease" speed={2} opacity={0.3} />
       {/* accent glow kicks on every beat */}
       <AbsoluteFill
@@ -171,40 +181,70 @@ const ShotPulse: React.FC<{len: number}> = ({len}) => {
   );
 };
 
-const FootageShot: React.FC<{src: string; seed: number}> = ({src, seed}) => {
+type Shot = {clip: number; from: number; pan: [number, number]};
+
+/** One footage shot: cover-crop with a slow pan (so a 9:16 crop still travels across the 16:9 clip), push-in and grade. */
+export const FootageShot: React.FC<{shot: Shot; len: number; overlay: number; blur?: number; seed: string}> = ({shot, len, overlay, blur = 0, seed}) => {
   const f = useCurrentFrame();
+  const files = detected.footage;
+  const src = files[shot.clip % files.length];
+  const p = Math.min(1, f / Math.max(1, len));
+  const pan = interpolate(p, [0, 1], shot.pan);
+  const {width, height} = useVideoConfig();
+  const zoom = footage.zoom[width < height ? 'vertical' : width === height ? 'square' : 'wide'];
   return (
-    <AbsoluteFill>
-      <OffthreadVideo src={staticFile(src)} muted trimBefore={seed * 20} style={{width: '100%', height: '100%', objectFit: 'cover', transform: `scale(${1.08 + f * 0.004})`}} />
-      <AbsoluteFill style={{background: `rgba(11,13,15,${footage.overlay})`}} />
-      <AbsoluteFill style={{background: `linear-gradient(180deg, ${accentDeep}33, transparent 40%, ${accent}22)`, mixBlendMode: 'screen'}} />
+    <AbsoluteFill style={{overflow: 'hidden'}}>
+      <OffthreadVideo
+        src={staticFile(src)}
+        muted
+        trimBefore={Math.round(shot.from * 30)}
+        style={{
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          objectPosition: `${pan * 100}% 50%`,
+          transform: `scale(${zoom * interpolate(p, [0, 1], [1.04, 1.14])})`,
+          transformOrigin: `${pan * 100}% 55%`,
+          filter: `contrast(1.12) saturate(1.1) brightness(0.95)${blur ? ` blur(${blur}px)` : ''}`,
+        }}
+      />
+      <AbsoluteFill style={{background: `rgba(11,13,15,${overlay})`}} />
+      <AbsoluteFill style={{background: `linear-gradient(180deg, rgba(11,13,15,0.55) 0%, transparent 30%, transparent 70%, rgba(11,13,15,0.7) 100%)`}} />
+      <AbsoluteFill style={{background: `linear-gradient(180deg, ${accentDeep}30, transparent 45%, ${accent}22)`, mixBlendMode: 'screen'}} />
       <LightStreaks count={5} seed={`ft${seed}`} speed={3} opacity={0.3} />
     </AbsoluteFill>
   );
 };
 
+export const hasFootage = () => footage.enabled !== false && detected.footage.length > 0;
+
 export const Energy: React.FC<{copy: Copy}> = ({copy}) => {
   const frame = useCurrentFrame();
   const cuts = hits.energyCuts.map((h) => h - scenes.energy.from);
-  const useFootage = footage.enabled !== false && detected.footage.length > 0;
+  const useFootage = hasFootage();
   const total = scenes.energy.duration;
   return (
     <AbsoluteFill>
-      {useFootage
-        ? new Array(Math.ceil(total / footage.cutEvery)).fill(0).map((_, i) => (
-            <Sequence key={i} from={i * footage.cutEvery} durationInFrames={footage.cutEvery} layout="none">
-              <FootageShot src={detected.footage[i % detected.footage.length]} seed={i} />
-            </Sequence>
-          ))
-        : cuts.map((c, i) => {
-            const len = (cuts[i + 1] ?? total) - c;
-            const Shot = [ShotBarbell, ShotPlate, ShotPulse, ShotBarbell][i % 4];
-            return (
-              <Sequence key={i} from={c} durationInFrames={len} layout="none">
-                <Shot len={len} lift={i === 3} />
-              </Sequence>
-            );
-          })}
+      {cuts.map((c, i) => {
+        const len = (cuts[i + 1] ?? total) - c;
+        const Graphic = [ShotBarbell, ShotPlate, ShotPulse, ShotBarbell][i % 4];
+        return (
+          <Sequence key={i} from={c} durationInFrames={len} layout="none">
+            {useFootage ? (
+              <>
+                <FootageShot shot={footage.shots[i % footage.shots.length]} len={len} overlay={footage.overlay} seed={`e${i}`} />
+                <Sparks at={0} count={i === cuts.length - 1 ? 50 : 22} seed={`ecut${i}`} y={undefined} power={i === cuts.length - 1 ? 1.2 : 0.8} />
+              </>
+            ) : (
+              <Graphic len={len} lift={i === 3} />
+            )}
+          </Sequence>
+        );
+      })}
+      {/* accent edge pulse on every beat */}
+      {useFootage ? (
+        <AbsoluteFill style={{boxShadow: `inset 0 0 ${120 + 160 * impactAt(frame + scenes.energy.from, 6)}px ${accent}66`}} />
+      ) : null}
       {copy.energyWord ? (
         <Safe>
           <div style={{opacity: 0.85}}>

@@ -95,13 +95,17 @@ const list = (dir, exts) =>
 const videos = list(path.join(pub, 'footage'), ['.mp4', '.mov', '.webm', '.m4v']).map((f) => `footage/${f}`);
 const audioFiles = list(path.join(pub, 'audio'), ['.mp3', '.wav', '.m4a', '.aac', '.ogg']);
 const userMusic = audioFiles.find((f) => !f.startsWith('voiceover'));
-const voPath = path.join(pub, audio.voiceover.file);
 const probe = (p) => {
   try {
     return parseFloat(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', p]).toString());
   } catch { return null; }
 };
-const voDuration = fs.existsSync(voPath) ? probe(voPath) : null;
+const recorded = {};
+for (const lang of ['en', 'fa']) {
+  const f = audioFiles.find((x) => x.startsWith(`voiceover-${lang}.`));
+  const d = f ? probe(path.join(pub, 'audio', f)) : null;
+  recorded[lang] = d ? {file: `audio/${f}`, durationInSeconds: d} : null;
+}
 
 fs.writeFileSync(
   path.join(genSrc, 'assets.ts'),
@@ -110,11 +114,12 @@ export const detected = {
   footage: ${JSON.stringify(videos)} as string[],
   userMusic: ${JSON.stringify(userMusic ? `audio/${userMusic}` : null)} as string | null,
   placeholderMusic: 'generated/placeholder-beat.wav',
-  voiceoverFa: ${voDuration ? JSON.stringify({file: audio.voiceover.file, durationInSeconds: voDuration}) : 'null'} as null | {file: string; durationInSeconds: number},
+  /** Recorded voiceovers (/public/audio/voiceover-en.* / voiceover-fa.*) — these override the AI narration. */
+  recordedVoiceover: ${JSON.stringify(recorded)} as Record<'en' | 'fa', null | {file: string; durationInSeconds: number}>,
 };
 `,
 );
-console.log(`footage clips: ${videos.length}, user music: ${userMusic ?? 'none (placeholder beat)'}, FA voiceover: ${voDuration ? voDuration.toFixed(1) + 's' : 'none'}`);
+console.log(`footage clips: ${videos.length}, user music: ${userMusic ?? 'none (placeholder beat)'}, recorded voiceover: en=${recorded.en ? 'yes' : 'no'} fa=${recorded.fa ? 'yes' : 'no'}`);
 
 // ---------------------------------------------------------------- 4 placeholder beat
 const wav = renderBeat({hits, scenes, fps: FPS, framesPerBeat: FRAMES_PER_BEAT, durationInFrames: DURATION_IN_FRAMES, fadeOutFrames: audio.fadeOutFrames});
